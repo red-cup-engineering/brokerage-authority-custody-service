@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonicalJson as canonical } from "@red-cup-engineering/canonical-json-service";
 
 const CREDENTIAL_FIELDS = new Set(["authorization", "apikey", "apikeyid", "apisecret", "clientid", "clientsecret", "secret", "token", "accesstoken", "refreshtoken", "privatekey", "password"]);
 const credentialField = (key) => { const normalized = String(key).toLowerCase().replace(/[-_\s]/gu, ""); return [...CREDENTIAL_FIELDS, "apisecretkey"].some((suffix) => normalized === suffix || normalized.endsWith(suffix)); };
@@ -45,7 +46,7 @@ function liveOperation(method, parsed) {
   if (method === "GET" && parsed.pathname === "/v2/account/activities" && query.length === 1 && query[0][0] === "activity_types" && query[0][1].length > 0) return { scope: "activities:read", effect: "read" };
   throw new TypeError("live-trading-operation-refused");
 }
-const canonical = (value) => value === null || typeof value !== "object" ? JSON.stringify(value) : Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+
 const paperClientOrderId = (contractId, intentId) => `paper-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
 const liveClientOrderId = (contractId, intentId) => `live-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
 function validatePaperOrderAuthorization({ authorization, reference, currentGrant, operation, body, nowMs }) {
