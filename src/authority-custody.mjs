@@ -10,76 +10,44 @@ function clean(value, seen = new Set()) {
   if (Array.isArray(value)) return value.map((member) => clean(member, seen));
   return Object.fromEntries(Object.entries(value).filter(([key]) => !credentialField(key)).map(([key, member]) => [key, clean(member, seen)]));
 }
-const PAPER_TRADING_HOST = "paper-api.alpaca.markets";
-const LIVE_TRADING_HOST = "api.alpaca.markets";
+const TRADING_HOST = Object.freeze({ paper: "paper-api.alpaca.markets", live: "api.alpaca.markets" });
 const PRODUCT_KINDS = Object.freeze({ "alpaca-connect": new Set(["alpaca-oauth"]), "alpaca-broker": new Set(["alpaca-broker-api-key", "alpaca-broker-client"]), "alpaca-trading-paper": new Set(["alpaca-trading-api-key"]), "alpaca-trading-live": new Set(["alpaca-trading-api-key-live"]) });
-function paperOrigin(url) {
-  let parsed; try { parsed = new URL(url); } catch { throw new TypeError("paper-trading-host-refused"); }
-  if (parsed.protocol !== "https:" || parsed.hostname !== PAPER_TRADING_HOST || parsed.port !== "" || parsed.username || parsed.password) throw new TypeError("paper-trading-host-refused");
-  return parsed;
-}
-function liveOrigin(url) {
-  let parsed; try { parsed = new URL(url); } catch { throw new TypeError("live-trading-host-refused"); }
-  if (parsed.protocol !== "https:" || parsed.hostname !== LIVE_TRADING_HOST || parsed.port !== "" || parsed.username || parsed.password) throw new TypeError("live-trading-host-refused");
+const CREDENTIAL_KIND = Object.freeze({ paper: "alpaca-trading-api-key", live: "alpaca-trading-api-key-live" });
+const capitalize = (mode) => `${mode[0].toUpperCase()}${mode.slice(1)}`;
+function originFor(mode, url) {
+  let parsed; try { parsed = new URL(url); } catch { throw new TypeError(`${mode}-trading-host-refused`); }
+  if (parsed.protocol !== "https:" || parsed.hostname !== TRADING_HOST[mode] || parsed.port !== "" || parsed.username || parsed.password) throw new TypeError(`${mode}-trading-host-refused`);
   return parsed;
 }
 const instant = (value, label) => { const parsed = Date.parse(value); if (!Number.isFinite(parsed)) throw new TypeError(`${label}-invalid`); return parsed; };
-function paperOperation(method, parsed) {
-  if (parsed.hash) throw new TypeError("paper-trading-operation-refused");
+function operationFor(mode, method, parsed) {
+  if (parsed.hash) throw new TypeError(`${mode}-trading-operation-refused`);
   const query = [...parsed.searchParams.entries()], noQuery = query.length === 0;
   if (method === "GET" && parsed.pathname === "/v2/account" && noQuery) return { scope: "account:read", effect: "read" };
   if (method === "GET" && parsed.pathname === "/v2/positions" && noQuery) return { scope: "positions:read", effect: "read" };
-  if (method === "POST" && parsed.pathname === "/v2/orders" && noQuery) return { scope: "orders:paper", effect: "place" };
-  if (method === "DELETE" && /^\/v2\/orders\/[^/]+$/u.test(parsed.pathname) && noQuery) return { scope: "orders:paper", effect: "cancel", orderId: decodeURIComponent(parsed.pathname.slice("/v2/orders/".length)) };
+  if (method === "POST" && parsed.pathname === "/v2/orders" && noQuery) return { scope: `orders:${mode}`, effect: "place" };
+  if (method === "DELETE" && /^\/v2\/orders\/[^/]+$/u.test(parsed.pathname) && noQuery) return { scope: `orders:${mode}`, effect: "cancel", orderId: decodeURIComponent(parsed.pathname.slice("/v2/orders/".length)) };
   if (method === "GET" && parsed.pathname === "/v2/orders:by_client_order_id" && query.length === 1 && query[0][0] === "client_order_id" && query[0][1].length > 0 && query[0][1].length <= 128) return { scope: "orders:read", effect: "read" };
   if (method === "GET" && parsed.pathname === "/v2/account/activities" && query.length === 1 && query[0][0] === "activity_types" && query[0][1].length > 0) return { scope: "activities:read", effect: "read" };
-  throw new TypeError("paper-trading-operation-refused");
-}
-function liveOperation(method, parsed) {
-  if (parsed.hash) throw new TypeError("live-trading-operation-refused");
-  const query = [...parsed.searchParams.entries()], noQuery = query.length === 0;
-  if (method === "GET" && parsed.pathname === "/v2/account" && noQuery) return { scope: "account:read", effect: "read" };
-  if (method === "GET" && parsed.pathname === "/v2/positions" && noQuery) return { scope: "positions:read", effect: "read" };
-  if (method === "POST" && parsed.pathname === "/v2/orders" && noQuery) return { scope: "orders:live", effect: "place" };
-  if (method === "DELETE" && /^\/v2\/orders\/[^/]+$/u.test(parsed.pathname) && noQuery) return { scope: "orders:live", effect: "cancel", orderId: decodeURIComponent(parsed.pathname.slice("/v2/orders/".length)) };
-  if (method === "GET" && parsed.pathname === "/v2/orders:by_client_order_id" && query.length === 1 && query[0][0] === "client_order_id" && query[0][1].length > 0 && query[0][1].length <= 128) return { scope: "orders:read", effect: "read" };
-  if (method === "GET" && parsed.pathname === "/v2/account/activities" && query.length === 1 && query[0][0] === "activity_types" && query[0][1].length > 0) return { scope: "activities:read", effect: "read" };
-  throw new TypeError("live-trading-operation-refused");
+  throw new TypeError(`${mode}-trading-operation-refused`);
 }
 
-const paperClientOrderId = (contractId, intentId) => `paper-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
-const liveClientOrderId = (contractId, intentId) => `live-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
-function validatePaperOrderAuthorization({ authorization, reference, currentGrant, operation, body, nowMs }) {
+const clientOrderIdFor = (mode, contractId, intentId) => `${mode}-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
+function validateOrderAuthorization(mode, { authorization, reference, currentGrant, operation, body, nowMs }) {
   const { contract, authorityGrant, intent, revocation } = authorization ?? {};
-  if (typeof reference !== "string" || reference.trim() === "" || intent?.id !== reference || intent.type !== "AggressiveBrokerageOrderIntent") throw new TypeError("exact-paper-order-authorization-required");
-  if (contract?.type !== "PrincipalBrokerageServiceContract" || authorityGrant?.type !== "RevocableBrokerageAuthorityGrant" || contract.id !== intent.contract || authorityGrant.id !== currentGrant.id || authorityGrant.principalContract !== contract.id || authorityGrant.revoked !== false || revocation?.effective === true) throw new TypeError("paper-order-authorization-binding-refused");
-  if (["credentialReference", "principal", "accountReference", "venue", "adapter", "validUntil"].some((field) => authorityGrant[field] !== currentGrant[field]) || canonical(authorityGrant.scopes) !== canonical(currentGrant.scopes)) throw new TypeError("paper-order-authoritative-grant-drift-refused");
-  if (contract.venue !== "alpaca-trading-paper" || authorityGrant.venue !== "alpaca-trading-paper" || authorityGrant.adapter !== "alpaca-trading-paper" || contract.principal !== authorityGrant.principal || contract.accountReference !== authorityGrant.accountReference || !contract.scopes?.includes(operation.scope) || !authorityGrant.scopes?.includes(operation.scope)) throw new TypeError("paper-order-authorization-binding-refused");
-  const contractExpiry = instant(contract.validUntil, "paper-contract-expiry"), grantExpiry = instant(authorityGrant.validUntil, "paper-authority-expiry");
-  if (nowMs >= contractExpiry || nowMs >= grantExpiry) throw new TypeError("paper-order-authorization-expired");
-  if (![intent.notional, intent.maximumLoss, contract.risk?.maximumOrderNotional, contract.risk?.maximumLossAmount].every(Number.isFinite) || intent.notional > contract.risk.maximumOrderNotional || intent.maximumLoss > contract.risk.maximumLossAmount) throw new TypeError("paper-order-risk-limit-refused");
-  const allowed = { symbol: intent.symbol, side: intent.side, notional: intent.notional, type: "market", time_in_force: "day", client_order_id: paperClientOrderId(contract.id, intent.id) };
-  if (canonical(body) !== canonical(allowed)) throw new TypeError("paper-order-body-drift-refused");
+  if (typeof reference !== "string" || reference.trim() === "" || intent?.id !== reference || intent.type !== "AggressiveBrokerageOrderIntent") throw new TypeError(`exact-${mode}-order-authorization-required`);
+  if (contract?.type !== "PrincipalBrokerageServiceContract" || authorityGrant?.type !== "RevocableBrokerageAuthorityGrant" || contract.id !== intent.contract || authorityGrant.id !== currentGrant.id || authorityGrant.principalContract !== contract.id || authorityGrant.revoked !== false || revocation?.effective === true) throw new TypeError(`${mode}-order-authorization-binding-refused`);
+  if (["credentialReference", "principal", "accountReference", "venue", "adapter", "validUntil"].some((field) => authorityGrant[field] !== currentGrant[field]) || canonical(authorityGrant.scopes) !== canonical(currentGrant.scopes)) throw new TypeError(`${mode}-order-authoritative-grant-drift-refused`);
+  if (contract.venue !== `alpaca-trading-${mode}` || authorityGrant.venue !== `alpaca-trading-${mode}` || authorityGrant.adapter !== `alpaca-trading-${mode}` || contract.principal !== authorityGrant.principal || contract.accountReference !== authorityGrant.accountReference || !contract.scopes?.includes(operation.scope) || !authorityGrant.scopes?.includes(operation.scope)) throw new TypeError(`${mode}-order-authorization-binding-refused`);
+  const contractExpiry = instant(contract.validUntil, `${mode}-contract-expiry`), grantExpiry = instant(authorityGrant.validUntil, `${mode}-authority-expiry`);
+  if (nowMs >= contractExpiry || nowMs >= grantExpiry) throw new TypeError(`${mode}-order-authorization-expired`);
+  if (![intent.notional, intent.maximumLoss, contract.risk?.maximumOrderNotional, contract.risk?.maximumLossAmount].every(Number.isFinite) || intent.notional > contract.risk.maximumOrderNotional || intent.maximumLoss > contract.risk.maximumLossAmount) throw new TypeError(`${mode}-order-risk-limit-refused`);
+  const allowed = { symbol: intent.symbol, side: intent.side, notional: intent.notional, type: "market", time_in_force: "day", client_order_id: clientOrderIdFor(mode, contract.id, intent.id) };
+  if (canonical(body) !== canonical(allowed)) throw new TypeError(`${mode}-order-body-drift-refused`);
 }
-function validatePaperCancellationAuthorization({ authorization, reference, currentGrant, operation, nowMs }) {
-  if (typeof reference !== "string" || reference.trim() === "" || authorization?.id !== reference || authorization.type !== "PaperOrderCancellationAuthorization" || authorization.authorityGrant !== currentGrant.id || authorization.orderId !== operation.orderId || authorization.revoked !== false) throw new TypeError("exact-paper-cancellation-authorization-required");
-  if (nowMs >= instant(authorization.validUntil, "paper-cancellation-expiry")) throw new TypeError("paper-cancellation-authorization-expired");
-}
-function validateLiveOrderAuthorization({ authorization, reference, currentGrant, operation, body, nowMs }) {
-  const { contract, authorityGrant, intent, revocation } = authorization ?? {};
-  if (typeof reference !== "string" || reference.trim() === "" || intent?.id !== reference || intent.type !== "AggressiveBrokerageOrderIntent") throw new TypeError("exact-live-order-authorization-required");
-  if (contract?.type !== "PrincipalBrokerageServiceContract" || authorityGrant?.type !== "RevocableBrokerageAuthorityGrant" || contract.id !== intent.contract || authorityGrant.id !== currentGrant.id || authorityGrant.principalContract !== contract.id || authorityGrant.revoked !== false || revocation?.effective === true) throw new TypeError("live-order-authorization-binding-refused");
-  if (["credentialReference", "principal", "accountReference", "venue", "adapter", "validUntil"].some((field) => authorityGrant[field] !== currentGrant[field]) || canonical(authorityGrant.scopes) !== canonical(currentGrant.scopes)) throw new TypeError("live-order-authoritative-grant-drift-refused");
-  if (contract.venue !== "alpaca-trading-live" || authorityGrant.venue !== "alpaca-trading-live" || authorityGrant.adapter !== "alpaca-trading-live" || contract.principal !== authorityGrant.principal || contract.accountReference !== authorityGrant.accountReference || !contract.scopes?.includes(operation.scope) || !authorityGrant.scopes?.includes(operation.scope)) throw new TypeError("live-order-authorization-binding-refused");
-  const contractExpiry = instant(contract.validUntil, "live-contract-expiry"), grantExpiry = instant(authorityGrant.validUntil, "live-authority-expiry");
-  if (nowMs >= contractExpiry || nowMs >= grantExpiry) throw new TypeError("live-order-authorization-expired");
-  if (![intent.notional, intent.maximumLoss, contract.risk?.maximumOrderNotional, contract.risk?.maximumLossAmount].every(Number.isFinite) || intent.notional > contract.risk.maximumOrderNotional || intent.maximumLoss > contract.risk.maximumLossAmount) throw new TypeError("live-order-risk-limit-refused");
-  const allowed = { symbol: intent.symbol, side: intent.side, notional: intent.notional, type: "market", time_in_force: "day", client_order_id: liveClientOrderId(contract.id, intent.id) };
-  if (canonical(body) !== canonical(allowed)) throw new TypeError("live-order-body-drift-refused");
-}
-function validateLiveCancellationAuthorization({ authorization, reference, currentGrant, operation, nowMs }) {
-  if (typeof reference !== "string" || reference.trim() === "" || authorization?.id !== reference || authorization.type !== "LiveOrderCancellationAuthorization" || authorization.authorityGrant !== currentGrant.id || authorization.orderId !== operation.orderId || authorization.revoked !== false) throw new TypeError("exact-live-cancellation-authorization-required");
-  if (nowMs >= instant(authorization.validUntil, "live-cancellation-expiry")) throw new TypeError("live-cancellation-authorization-expired");
+function validateCancellationAuthorization(mode, { authorization, reference, currentGrant, operation, nowMs }) {
+  if (typeof reference !== "string" || reference.trim() === "" || authorization?.id !== reference || authorization.type !== `${capitalize(mode)}OrderCancellationAuthorization` || authorization.authorityGrant !== currentGrant.id || authorization.orderId !== operation.orderId || authorization.revoked !== false) throw new TypeError(`exact-${mode}-cancellation-authorization-required`);
+  if (nowMs >= instant(authorization.validUntil, `${mode}-cancellation-expiry`)) throw new TypeError(`${mode}-cancellation-authorization-expired`);
 }
 
 export function createBrokerageAuthorityCustody({ authorityCustody, transport, resolveAuthorityGrant, resolvePaperOperationAuthorization, resolvePaperObservationAuthorization, resolveLiveOperationAuthorization, fetchImpl = fetch, brokerTokenEndpoint = "https://authx.alpaca.markets/v1/oauth2/token", clock = () => new Date().toISOString() }) {
@@ -90,58 +58,39 @@ export function createBrokerageAuthorityCustody({ authorityCustody, transport, r
       let record, effectiveScope = scope;
       if (!PRODUCT_KINDS[product]) throw new TypeError("unknown-brokerage-product-refused");
       const requestTime = clock(), requestTimeMs = instant(requestTime, "custody-clock");
-      if (product === "alpaca-trading-paper") {
-        const operation = paperOperation(method, paperOrigin(url));
-        if (typeof observationAuthorizationReference === "string") {
+      if (product === "alpaca-trading-paper" || product === "alpaca-trading-live") {
+        const mode = product === "alpaca-trading-paper" ? "paper" : "live";
+        const operation = operationFor(mode, method, originFor(mode, url));
+        if (mode === "paper" && typeof observationAuthorizationReference === "string") {
           if (typeof resolvePaperObservationAuthorization !== "function" || authorityGrantReference !== undefined || operationAuthorizationReference !== undefined || credentialReference !== undefined || scope !== undefined || operation.effect !== "read" || !["account:read", "positions:read"].includes(operation.scope)) throw new TypeError("paper-observation-authorization-refused");
           const authorization = await resolvePaperObservationAuthorization(observationAuthorizationReference);
-          if (authorization?.id !== observationAuthorizationReference || authorization.type !== "PrincipalPaperAccountObservationAuthorization" || authorization.revoked !== false || authorization.venue !== "alpaca-trading-paper" || !authorization.scopes?.includes(operation.scope) || requestTimeMs >= instant(authorization.validUntil, "paper-observation-expiry")) throw new TypeError("current-paper-observation-authorization-required");
+          if (authorization?.id !== observationAuthorizationReference || authorization.type !== "PrincipalPaperAccountObservationAuthorization" || authorization.revoked !== false || authorization.venue !== product || !authorization.scopes?.includes(operation.scope) || requestTimeMs >= instant(authorization.validUntil, "paper-observation-expiry")) throw new TypeError("current-paper-observation-authorization-required");
           record = await authorityCustody.retrieve(authorization.credentialReference);
-          if (!record || record.kind !== "alpaca-trading-api-key" || record.environment !== "paper" || record.venue !== "alpaca-trading-paper" || record.accountReference !== authorization.accountAlias) throw new TypeError("paper-observation-credential-binding-refused");
+          if (!record || record.kind !== CREDENTIAL_KIND[mode] || record.environment !== mode || record.venue !== product || record.accountReference !== authorization.accountAlias) throw new TypeError("paper-observation-credential-binding-refused");
           effectiveScope = operation.scope; credentialReference = authorization.credentialReference;
         } else {
-        if (typeof resolveAuthorityGrant !== "function") throw new TypeError("paper-authority-grant-resolver-required");
-        if (credentialReference !== undefined || scope !== undefined || typeof authorityGrantReference !== "string" || authorityGrantReference.trim() === "") throw new TypeError("paper-authority-reference-only-required");
+        if (mode === "live" && observationAuthorizationReference !== undefined) throw new TypeError("live-observation-shortcut-not-supported");
+        const resolveOperationAuthorization = mode === "paper" ? resolvePaperOperationAuthorization : resolveLiveOperationAuthorization;
+        if (typeof resolveAuthorityGrant !== "function") throw new TypeError(`${mode}-authority-grant-resolver-required`);
+        if (credentialReference !== undefined || scope !== undefined || typeof authorityGrantReference !== "string" || authorityGrantReference.trim() === "") throw new TypeError(`${mode}-authority-reference-only-required`);
         const grant = await resolveAuthorityGrant(authorityGrantReference);
-        if (grant?.id !== authorityGrantReference || grant.type !== "RevocableBrokerageAuthorityGrant" || grant.revoked !== false) throw new TypeError("current-paper-authority-grant-required");
-        const grantExpiry = instant(grant.validUntil, "paper-authority-expiry");
-        if (requestTimeMs >= grantExpiry) throw new TypeError("paper-authority-expired");
+        if (grant?.id !== authorityGrantReference || grant.type !== "RevocableBrokerageAuthorityGrant" || grant.revoked !== false) throw new TypeError(`current-${mode}-authority-grant-required`);
+        const grantExpiry = instant(grant.validUntil, `${mode}-authority-expiry`);
+        if (requestTimeMs >= grantExpiry) throw new TypeError(`${mode}-authority-expired`);
         record = await authorityCustody.retrieve(grant.credentialReference);
         if (!record) throw new TypeError("credential-reference-revoked-or-unknown");
-        if (record.kind !== "alpaca-trading-api-key" || record.environment !== "paper" || record.venue !== "alpaca-trading-paper" || grant.principal !== record.principal || grant.accountReference !== record.accountReference || grant.venue !== record.venue || grant.adapter !== "alpaca-trading-paper") throw new TypeError("paper-authority-binding-mismatch");
+        if (record.kind !== CREDENTIAL_KIND[mode] || record.environment !== mode || record.venue !== product || grant.principal !== record.principal || grant.accountReference !== record.accountReference || grant.venue !== record.venue || grant.adapter !== product) throw new TypeError(`${mode}-authority-binding-mismatch`);
         effectiveScope = operation.scope;
-        if (!grant.scopes?.includes(effectiveScope)) throw new TypeError("paper-authority-operation-scope-refused");
+        if (!grant.scopes?.includes(effectiveScope)) throw new TypeError(`${mode}-authority-operation-scope-refused`);
         if (operation.effect !== "read") {
-          if (typeof resolvePaperOperationAuthorization !== "function") throw new TypeError("paper-operation-authorization-resolver-required");
-          if (typeof operationAuthorizationReference !== "string" || operationAuthorizationReference.trim() === "") throw new TypeError("exact-paper-operation-authorization-required");
-          const authorization = await resolvePaperOperationAuthorization(operationAuthorizationReference);
-          if (operation.effect === "place") validatePaperOrderAuthorization({ authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, body, nowMs: requestTimeMs });
-          else validatePaperCancellationAuthorization({ authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, nowMs: requestTimeMs });
-        } else if (operationAuthorizationReference !== undefined) throw new TypeError("paper-read-operation-authorization-refused");
+          if (typeof resolveOperationAuthorization !== "function") throw new TypeError(`${mode}-operation-authorization-resolver-required`);
+          if (typeof operationAuthorizationReference !== "string" || operationAuthorizationReference.trim() === "") throw new TypeError(`exact-${mode}-operation-authorization-required`);
+          const authorization = await resolveOperationAuthorization(operationAuthorizationReference);
+          if (operation.effect === "place") validateOrderAuthorization(mode, { authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, body, nowMs: requestTimeMs });
+          else validateCancellationAuthorization(mode, { authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, nowMs: requestTimeMs });
+        } else if (operationAuthorizationReference !== undefined) throw new TypeError(`${mode}-read-operation-authorization-refused`);
         credentialReference = grant.credentialReference;
         }
-      } else if (product === "alpaca-trading-live") {
-        const operation = liveOperation(method, liveOrigin(url));
-        if (observationAuthorizationReference !== undefined) throw new TypeError("live-observation-shortcut-not-supported");
-        if (typeof resolveAuthorityGrant !== "function") throw new TypeError("live-authority-grant-resolver-required");
-        if (credentialReference !== undefined || scope !== undefined || typeof authorityGrantReference !== "string" || authorityGrantReference.trim() === "") throw new TypeError("live-authority-reference-only-required");
-        const grant = await resolveAuthorityGrant(authorityGrantReference);
-        if (grant?.id !== authorityGrantReference || grant.type !== "RevocableBrokerageAuthorityGrant" || grant.revoked !== false) throw new TypeError("current-live-authority-grant-required");
-        const grantExpiry = instant(grant.validUntil, "live-authority-expiry");
-        if (requestTimeMs >= grantExpiry) throw new TypeError("live-authority-expired");
-        record = await authorityCustody.retrieve(grant.credentialReference);
-        if (!record) throw new TypeError("credential-reference-revoked-or-unknown");
-        if (record.kind !== "alpaca-trading-api-key-live" || record.environment !== "live" || record.venue !== "alpaca-trading-live" || grant.principal !== record.principal || grant.accountReference !== record.accountReference || grant.venue !== record.venue || grant.adapter !== "alpaca-trading-live") throw new TypeError("live-authority-binding-mismatch");
-        effectiveScope = operation.scope;
-        if (!grant.scopes?.includes(effectiveScope)) throw new TypeError("live-authority-operation-scope-refused");
-        if (operation.effect !== "read") {
-          if (typeof resolveLiveOperationAuthorization !== "function") throw new TypeError("live-operation-authorization-resolver-required");
-          if (typeof operationAuthorizationReference !== "string" || operationAuthorizationReference.trim() === "") throw new TypeError("exact-live-operation-authorization-required");
-          const authorization = await resolveLiveOperationAuthorization(operationAuthorizationReference);
-          if (operation.effect === "place") validateLiveOrderAuthorization({ authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, body, nowMs: requestTimeMs });
-          else validateLiveCancellationAuthorization({ authorization, reference: operationAuthorizationReference, currentGrant: grant, operation, nowMs: requestTimeMs });
-        } else if (operationAuthorizationReference !== undefined) throw new TypeError("live-read-operation-authorization-refused");
-        credentialReference = grant.credentialReference;
       } else {
         record = await authorityCustody.retrieve(credentialReference);
         if (!record) throw new TypeError("credential-reference-revoked-or-unknown");
