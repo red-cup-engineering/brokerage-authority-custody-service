@@ -16,6 +16,6 @@
   ],
   "description": "brokerage-authority-custody-service sovereign enterprise",
   "dependencies": {
-    "@red-cup-engineering/canonical-json-service": "0.2.1"
+    "@red-cup-engineering/computer-data-engine": "0.10.0"
   }
 }
