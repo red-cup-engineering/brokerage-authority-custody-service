@@ -1,0 +1,21 @@
+{
+  "name": "@red-cup-engineering/brokerage-authority-custody-service",
+  "version": "0.1.4",
+  "type": "module",
+  "exports": {
+    ".": "./src/authority-custody.mjs",
+    "./alpaca-connect-oauth": "./src/alpaca-connect-oauth.mjs",
+    "./src/authority-custody.mjs": "./src/authority-custody.mjs"
+  },
+  "scripts": {
+    "check": "node --check src/authority-custody.mjs && node --check src/alpaca-connect-oauth.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "description": "brokerage-authority-custody-service sovereign enterprise",
+  "dependencies": {
+    "@red-cup-engineering/json-services-section": "1.0.0"
+  }
+}
