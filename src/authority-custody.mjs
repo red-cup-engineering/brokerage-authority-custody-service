@@ -79,7 +79,17 @@ export function createBrokerageAuthorityCustody({ authorityCustody, transport, r
         if (requestTimeMs >= grantExpiry) throw new TypeError(`${mode}-authority-expired`);
         record = await authorityCustody.retrieve(grant.credentialReference);
         if (!record) throw new TypeError("credential-reference-revoked-or-unknown");
-        if (record.kind !== CREDENTIAL_KIND[mode] || record.environment !== mode || record.venue !== product || grant.principal !== record.principal || grant.accountReference !== record.accountReference || grant.venue !== record.venue || grant.adapter !== product) throw new TypeError(`${mode}-authority-binding-mismatch`);
+        // A Connect OAuth token is a user-granted Trading API credential, not
+        // a broker API token.  Its account reference is read from Alpaca at
+        // the code exchange and sealed with the token, so it has the same
+        // principal/account/grant binding as an API-key record.
+        const apiKeyCredential = record.kind === CREDENTIAL_KIND[mode]
+          && record.environment === mode && record.venue === product
+          && grant.accountReference === record.accountReference;
+        const oauthCredential = record.kind === "alpaca-oauth"
+          && record.environment === mode && record.venue === product
+          && grant.accountReference === record.accountReference;
+        if ((!apiKeyCredential && !oauthCredential) || grant.principal !== record.principal || grant.venue !== product || grant.adapter !== product) throw new TypeError(`${mode}-authority-binding-mismatch`);
         effectiveScope = operation.scope;
         if (!grant.scopes?.includes(effectiveScope)) throw new TypeError(`${mode}-authority-operation-scope-refused`);
         if (operation.effect !== "read") {
