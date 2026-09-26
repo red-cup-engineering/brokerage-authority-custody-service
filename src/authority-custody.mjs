@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { canonicalJson as canonical } from "@red-cup-engineering/json-services-section/canonical-json";
+import { sha256Hex } from "@red-cup-engineering/cryptographic-computer-data-engineering-services-section/integrity";
 
 const CREDENTIAL_FIELDS = new Set(["authorization", "apikey", "apikeyid", "apisecret", "clientid", "clientsecret", "secret", "token", "accesstoken", "refreshtoken", "privatekey", "password"]);
 const credentialField = (key) => { const normalized = String(key).toLowerCase().replace(/[-_\s]/gu, ""); return [...CREDENTIAL_FIELDS, "apisecretkey"].some((suffix) => normalized === suffix || normalized.endsWith(suffix)); };
@@ -32,7 +32,7 @@ function operationFor(mode, method, parsed) {
   throw new TypeError(`${mode}-trading-operation-refused`);
 }
 
-const clientOrderIdFor = (mode, contractId, intentId) => `${mode}-${createHash("sha256").update(`${contractId}:${intentId}`).digest("hex").slice(0, 48)}`;
+const clientOrderIdFor = (mode, contractId, intentId) => `${mode}-${sha256Hex(`${contractId}:${intentId}`).slice(0, 48)}`;
 function validateOrderAuthorization(mode, { authorization, reference, currentGrant, operation, body, nowMs }) {
   const { contract, authorityGrant, intent, revocation } = authorization ?? {};
   if (typeof reference !== "string" || reference.trim() === "" || intent?.id !== reference || intent.type !== "AggressiveBrokerageOrderIntent") throw new TypeError(`exact-${mode}-order-authorization-required`);
