@@ -16,7 +16,7 @@
   ],
   "description": "brokerage-authority-custody-service sovereign enterprise",
   "dependencies": {
-    "@red-cup-engineering/cryptographic-computer-data-engineering-services-section": "0.3.0",
-    "@red-cup-engineering/json-services-section": "1.0.0"
+    "@red-cup-engineering/cryptographic-computer-data-engineering-services-section": "workspace:*",
+    "@red-cup-engineering/json-services-section": "workspace:*"
   }
 }
