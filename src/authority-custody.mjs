@@ -25,6 +25,7 @@ function operationFor(mode, method, parsed) {
   const query = [...parsed.searchParams.entries()], noQuery = query.length === 0;
   if (method === "GET" && parsed.pathname === "/v2/account" && noQuery) return { scope: "account:read", effect: "read" };
   if (method === "GET" && parsed.pathname === "/v2/positions" && noQuery) return { scope: "positions:read", effect: "read" };
+  if (method === "GET" && parsed.pathname === "/v2/orders" && query.length === 2 && parsed.searchParams.get("status") === "open" && parsed.searchParams.get("limit") === "500") return { scope: "orders:read", effect: "read" };
   if (method === "POST" && parsed.pathname === "/v2/orders" && noQuery) return { scope: `orders:${mode}`, effect: "place" };
   if (method === "DELETE" && /^\/v2\/orders\/[^/]+$/u.test(parsed.pathname) && noQuery) return { scope: `orders:${mode}`, effect: "cancel", orderId: decodeURIComponent(parsed.pathname.slice("/v2/orders/".length)) };
   if (method === "GET" && parsed.pathname === "/v2/orders:by_client_order_id" && query.length === 1 && query[0][0] === "client_order_id" && query[0][1].length > 0 && query[0][1].length <= 128) return { scope: "orders:read", effect: "read" };
