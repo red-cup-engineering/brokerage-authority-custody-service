@@ -30,6 +30,14 @@ function operationFor(mode, method, parsed) {
   if (method === "DELETE" && /^\/v2\/orders\/[^/]+$/u.test(parsed.pathname) && noQuery) return { scope: `orders:${mode}`, effect: "cancel", orderId: decodeURIComponent(parsed.pathname.slice("/v2/orders/".length)) };
   if (method === "GET" && parsed.pathname === "/v2/orders:by_client_order_id" && query.length === 1 && query[0][0] === "client_order_id" && query[0][1].length > 0 && query[0][1].length <= 128) return { scope: "orders:read", effect: "read" };
   if (method === "GET" && parsed.pathname === "/v2/account/activities" && query.length === 1 && query[0][0] === "activity_types" && query[0][1].length > 0) return { scope: "activities:read", effect: "read" };
+  if (method === "GET" && parsed.pathname === "/v2/account/activities"
+    && new Set(query.map(([key]) => key)).size === query.length
+    && query.every(([key]) => ["activity_types", "order_id", "page_size", "direction", "page_token"].includes(key))
+    && parsed.searchParams.get("activity_types") === "FILL"
+    && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(parsed.searchParams.get("order_id") ?? "")
+    && /^(?:[1-9]|[1-9][0-9]|100)$/u.test(parsed.searchParams.get("page_size") ?? "")
+    && parsed.searchParams.get("direction") === "asc"
+    && (!parsed.searchParams.has("page_token") || (parsed.searchParams.get("page_token").length > 0 && parsed.searchParams.get("page_token").length <= 512))) return { scope: "activities:read", effect: "read" };
   throw new TypeError(`${mode}-trading-operation-refused`);
 }
 
