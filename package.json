@@ -1,6 +1,6 @@
 {
   "name": "@red-cup-engineering/brokerage-authority-custody-service",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "exports": {
     ".": "./src/authority-custody.mjs",
@@ -16,7 +16,8 @@
   ],
   "description": "brokerage-authority-custody-service sovereign enterprise",
   "dependencies": {
-    "@red-cup-engineering/cryptographic-computer-data-engineering-services-section": "workspace:*",
-    "@red-cup-engineering/json-services-section": "workspace:*"
-  }
+    "@red-cup-engineering/cryptographic-computer-data-engineering-services-section": "0.3.1",
+    "@red-cup-engineering/json-services-section": "0.4.0"
+  },
+  "private": false
 }
