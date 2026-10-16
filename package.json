@@ -1,6 +1,6 @@
 {
   "name": "@red-cup-engineering/brokerage-authority-custody-service",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "exports": {
     ".": "./src/authority-custody.mjs",
