@@ -17,8 +17,7 @@
   "description": "brokerage-authority-custody-service sovereign enterprise",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/red-cup-engineering/prediction-market-engineering-services-section.git",
-    "directory": "services/brokerage-authority-custody-service"
+    "url": "git+https://github.com/red-cup-engineering/brokerage-authority-custody-service.git"
   },
   "dependencies": {
     "@red-cup-engineering/cryptographic-computer-data-engineering-services-section": "0.3.1",
